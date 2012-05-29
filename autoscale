@@ -88,11 +88,9 @@ begin
 	parsed = JSON.parse(relic_call)
   load_ratio = (parsed[0]['busy_percent'] + (20.0 * pessimism))/100
 
-  heroku_output = try_run!("#{heroku_command} dynos --app #{app_name}")
-	current_dynos = heroku_output.match(/\d+/)[0].to_i
-
-	heroku_output = try_run!("#{heroku_command} workers --app #{app_name}")
-	current_workers = heroku_output.match(/\d+/)[0].to_i
+  heroku_output = try_run!("#{heroku_command} ps --app #{app_name}")
+  current_dynos = heroku_output.scan(/web/).count
+  current_workers = heroku_output.scan(/worker/).count
   dynos_load_ratio = (load_ratio/(current_dynos.to_f/(current_dynos+current_workers))) * pessimism
 
 	puts "Current dynos: #{current_dynos}"

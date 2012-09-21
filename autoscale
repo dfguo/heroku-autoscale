@@ -14,13 +14,12 @@ end
 
 ActionMailer::Base.delivery_method = :smtp
 ActionMailer::Base.smtp_settings = {
-  :address              => "smtp.gmail.com",
+  :address              => "smtp.sendgrid.net",
   :port                 => 587,
-  :domain               => ENV['AUTOSCALE_EMAIL_DOMAIN'],
-  :user_name            => SENDER,
-  :password             => ENV['AUTOSCALE_SENDER_PASS'],
-  :authentication       => 'plain',
-  :enable_starttls_auto => true
+  :domain               => 'heroku.com',
+  :user_name            => ENV['SENDGRID_USERNAME'],
+  :password             => ENV['SENDGRID_PASSWORD'],
+  :authentication       => 'plain'
 }
 
 class AutoscaleMailer < ActionMailer::Base
@@ -36,13 +35,13 @@ end
 app_name = ARGV[0]
 has_heroku = !`which heroku`.empty?
 heroku_command = has_heroku ? 'heroku' : 'ruby -lrubygems /var/lib/gems/1.8/gems/heroku-2.4.0/bin/heroku'
-log_path = has_heroku ? '' : '/home/ubuntu/heroku_autoscale/log/'
+log_path = has_heroku ? '' : '/var/log/heroku_autoscale/log/'
 
 #You could configure this
-interval_minutes = 3
+interval_minutes = 2
 min_ratio, max_ratio = 0.72, 0.85
 avg_ratio = (max_ratio + min_ratio) / 2.0
-min_dynos = 12 # it will never go below 12 dynos. It might be too much for your application 
+min_dynos = 4 # it will never go below 12 dynos. It might be too much for your application 
 pessimism = 0.8 # 1 is max, 0 is min
 
 relic = {
@@ -54,6 +53,8 @@ relic = {
  "app_id" => ENV['NEWRELIC_APP_ID'],
  "api_key" => ENV['NEWRELIC_API_KEY']
 }
+
+puts relic.inspect
 
 today = Time.now.strftime("%Y-%m-%d")
 log_file = "#{log_path}#{app_name}_autoscale_log_#{today}.csv"
@@ -84,6 +85,8 @@ puts "[#{Time.now}]"
 puts "Fetching last #{interval_minutes} minutes load busy percentage from NewRelic..."
 heroku_output = nil
 begin
+  puts "curl --silent -H \"x-api-key:#{relic['api_key']}\" -d \"metrics[]=#{relic['metric_type']}\" -d \"field=#{relic['fields']}\" -d \"begin=#{relic['begin']}\" -d \"end=#{relic['end']}\" -d \"summary=#{relic['summary_mode']}\" https://api.newrelic.com/api/v1/applications/#{relic['app_id']}/data.json"
+
   relic_call = `curl --silent -H \"x-api-key:#{relic['api_key']}\" -d \"metrics[]=#{relic['metric_type']}\" -d \"field=#{relic['fields']}\" -d \"begin=#{relic['begin']}\" -d \"end=#{relic['end']}\" -d \"summary=#{relic['summary_mode']}\" https://api.newrelic.com/api/v1/applications/#{relic['app_id']}/data.json`
 	parsed = JSON.parse(relic_call)
   load_ratio = (parsed[0]['busy_percent'] + (20.0 * pessimism))/100
@@ -109,7 +112,7 @@ begin
   time_set = Time.now
 	if dynos_load_ratio > max_ratio || dynos_load_ratio < min_ratio
 	  if should_dynos != current_dynos
-      heroku_output = try_run!("#{heroku_command} dynos #{should_dynos} --app #{app_name}")
+      heroku_output = try_run!("#{heroku_command} scale web=#{should_dynos} --app #{app_name}")
       puts "#{app_name} dynos adjusted to #{should_dynos}"
       File.open(log_file, 'a') do |f|
   		  f.write("#{Time.now},#{current_dynos},#{should_dynos},#{current_workers},#{parsed[0]['busy_percent']},#{dynos_load_ratio*100}\n")
